@@ -334,7 +334,8 @@ video::cue {
 .modal.detail {
   max-width: 860px;
   padding: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .detail-hero {
