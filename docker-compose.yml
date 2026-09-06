@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      MOVIE_DB: /app/data/movies.db
+      MOVIE_DIR: /mnt/movies
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+    volumes:
+      - movie-data:/app/data
+      - ${MEDIA_DIR:?Please set MEDIA_DIR in .env (absolute path to your media folder)}:/mnt/movies
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000" # direct API access for dev; production goes through nginx
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    expose:
+      - "3000"
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ${MEDIA_DIR:?Please set MEDIA_DIR in .env (absolute path to your media folder)}:/mnt/movies:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # Set TUNNEL_TOKEN in .env (from your Cloudflare dashboard),
+    # then: docker compose up -d cloudflared
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:-missing}
+    depends_on:
+      - nginx
+    restart: unless-stopped
+
+volumes:
+  movie-data:
