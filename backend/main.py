@@ -94,6 +94,12 @@ class ShowDetail(Show):
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     database.init_db()
+    # Drop orphaned remux temp files from interrupted builds.
+    try:
+        for tmp in REMUX_DIR.glob("*.tmp.mp4"):
+                            tmp.unlink()
+    except OSError:
+        pass
     # With multiple workers, only one performs startup indexing —
     # the rest just serve. (fcntl lock, non-blocking.)
     try:
@@ -442,6 +448,24 @@ def _lookup_media(movie_id: int) -> Path:
     return path
 
 
+def _ensure_remux(path: Path, movie_id: int) -> None:
+    """Build the cached MP4 if stale, serialized across workers via file lock."""
+    import fcntl
+
+    dst, meta = _remux_paths(movie_id)
+    with open(REMUX_DIR / f"{movie_id}.lock", "w") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        try:
+            # Re-check inside the lock: a concurrent request may have built it.
+            if _remux_fresh(path, dst, meta):
+                return
+            log = logging.getLogger("uvicorn.error")
+            log.info("remuxing %s for Firefox-compatible playback", path.name)
+            _build_remux(path, dst, meta)
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
 @app.get("/api/remux/{movie_id}/status")
 async def remux_status(movie_id: int) -> dict:
     path = _lookup_media(movie_id)
@@ -460,13 +484,10 @@ async def remux_movie(movie_id: int, request: Request):
     if path.suffix.lower() not in NEEDS_REMUX:
         raise HTTPException(status_code=400, detail="Remux not needed for this file")
     dst, meta = _remux_paths(movie_id)
-    if not _remux_fresh(path, dst, meta):
-        log = logging.getLogger("uvicorn.error")
-        log.info("remuxing %s for Firefox-compatible playback", path.name)
-        try:
-            await asyncio.to_thread(_build_remux, path, dst, meta)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Remux failed: {exc}")
+    try:
+        await asyncio.to_thread(_ensure_remux, path, movie_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Remux failed: {exc}")
     if request.headers.get("x-via-nginx") == "1":
         return Response(
             status_code=200,
