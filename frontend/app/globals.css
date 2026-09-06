@@ -1412,3 +1412,217 @@ video::cue {
   pointer-events: none;
   white-space: nowrap;
 }
+
+/* Remux notice (Firefox one-time conversion) */
+.remux-note {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+  background: rgba(10, 10, 10, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 14px;
+  color: #d6dbe6;
+  max-width: min(520px, 86vw);
+  text-align: center;
+  z-index: 6;
+}
+
+/* ---------- touch devices: no hover, swipe instead ---------- */
+@media (hover: none) {
+  .card-hover {
+    opacity: 1;
+  }
+  .rail-arrow {
+    display: none;
+  }
+  .rail-track {
+    scroll-snap-type: x proximity;
+  }
+}
+
+/* ---------- tablets / small laptops ---------- */
+@media (max-width: 900px) {
+  .app {
+    padding: 8px 16px 48px;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    padding: 12px 16px;
+  }
+  .nav-links {
+    order: 3;
+    width: 100%;
+    gap: 4px 16px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .nav-link {
+    white-space: nowrap;
+    font-size: 14px;
+  }
+  .nav-search {
+    margin-left: 0;
+    flex: 1;
+    min-width: 120px;
+    width: auto;
+  }
+  .billboard {
+    min-height: 72svh;
+  }
+  .billboard-content {
+    padding: 0 20px;
+  }
+  .billboard-content h1 {
+    font-size: clamp(30px, 7vw, 48px);
+  }
+  .detail-cols {
+    grid-template-columns: 1fr;
+  }
+  .detail-hero {
+    min-height: 260px;
+    padding: 20px;
+  }
+  .detail-hero h2 {
+    font-size: 30px;
+  }
+  .detail-body {
+    padding: 4px 20px 24px;
+  }
+  .session-device {
+    max-width: 52vw;
+  }
+}
+
+/* ---------- phones ---------- */
+@media (max-width: 640px) {
+  .logo {
+    font-size: 19px;
+  }
+  .billboard {
+    min-height: 64svh;
+    margin-top: -110px;
+    padding-top: 110px;
+  }
+  .billboard-kicker {
+    font-size: 12px;
+    letter-spacing: 4px;
+  }
+  .hero-meta {
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .hero-desc {
+    font-size: 14px;
+    -webkit-line-clamp: 2;
+  }
+  .hero-actions {
+    flex-wrap: wrap;
+  }
+  .btn-play,
+  .btn-info {
+    padding: 10px 20px;
+    font-size: 15px;
+  }
+  .maturity {
+    display: none;
+  }
+  .rail-title {
+    font-size: 17px;
+  }
+  .rail-track .card {
+    flex-basis: 128px;
+  }
+  .card-body h3 {
+    font-size: 13px;
+  }
+  .grid-page {
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+    gap: 12px;
+  }
+  .controls.slim {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .controls.slim select {
+    flex: 1;
+    min-width: 110px;
+  }
+  .overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .modal {
+    max-width: 100%;
+    max-height: 94dvh;
+    border-radius: 16px 16px 0 0;
+  }
+  .modal.detail {
+    max-height: 94dvh;
+  }
+  .detail-hero {
+    min-height: 200px;
+    padding: 16px;
+  }
+  .detail-hero h2 {
+    font-size: 24px;
+  }
+  .detail-body {
+    padding: 4px 16px 24px;
+  }
+  .similar-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .ep-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* player: compact controls */
+  .p-row {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .p-btn {
+    font-size: 19px;
+  }
+  input.vol,
+  .p-time {
+    display: none;
+  }
+  .p-text-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .p-title {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .skip-intro {
+    right: 16px;
+    bottom: 110px;
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+  .remux-note {
+    bottom: 150px;
+    font-size: 13px;
+  }
+  /* sessions stack */
+  .session-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .session-device {
+    max-width: 100%;
+  }
+  .login-card {
+    padding: 32px 24px;
+  }
+}

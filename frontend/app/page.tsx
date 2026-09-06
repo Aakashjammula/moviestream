@@ -59,6 +59,7 @@ interface Playing {
   genre: string;
   language: string;
   quality: string;
+  container?: string;
   queue?: { id: number; title: string }[];
   resumeFrom?: number;
 }
@@ -113,6 +114,11 @@ async function apiMut<T>(path: string, method: string): Promise<T> {
 
 function splitList(v: string): string[] {
   return v.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function extOf(p: string): string {
+  const i = p.lastIndexOf(".");
+  return i >= 0 ? p.slice(i).toLowerCase() : "";
 }
 
 function fmtTime(s: number): string {
@@ -332,6 +338,7 @@ export default function Home() {
       genre: m.genre,
       language: m.language,
       quality: m.quality,
+      container: extOf(m.file_path),
       resumeFrom,
     });
 
@@ -347,6 +354,7 @@ export default function Home() {
       genre: show.genres,
       language: startEp.language,
       quality: startEp.quality,
+      container: extOf(startEp.file_path),
       queue,
       resumeFrom: saved ? saved.time : undefined,
     });
@@ -685,6 +693,7 @@ export default function Home() {
               genre: playing.genre,
               language: playing.language,
               quality: playing.quality,
+              container: playing.container,
               queue: playing.queue?.slice(1),
             })
           }
@@ -1174,6 +1183,7 @@ function PlayerModal({
   const [flash, setFlash] = useState<string | null>(null);
   const [introSkipped, setIntroSkipped] = useState(false);
   const [seekAnim, setSeekAnim] = useState<"-10" | "+10" | null>(null);
+  const [remuxNote, setRemuxNote] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1186,6 +1196,19 @@ function PlayerModal({
       })
       .catch(() => setSubs([]));
   }, [playing.id]);
+
+  // Firefox can't play MKV in some builds: use the MP4 remux instead.
+  const needsRemux =
+    typeof navigator !== "undefined" &&
+    /firefox|fxios/i.test(navigator.userAgent) &&
+    (playing.container || "") === ".mkv";
+
+  useEffect(() => {
+    if (!needsRemux) return;
+    api<{ cached: boolean; needed: boolean }>(`/api/remux/${playing.id}/status`)
+      .then((s) => setRemuxNote(s.needed && !s.cached))
+      .catch(() => {});
+  }, [playing.id, needsRemux]);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.muted = muted;
@@ -1315,7 +1338,7 @@ function PlayerModal({
       <div className="player-shell" ref={shellRef}>
         <video
           ref={videoRef}
-          src={`/api/stream/${playing.id}`}
+          src={needsRemux ? `/api/remux/${playing.id}` : `/api/stream/${playing.id}`}
           autoPlay
           preload="auto"
           onClick={onVideoClick}
@@ -1369,6 +1392,11 @@ function PlayerModal({
         {buffering && (
           <div className="buffer-spinner">
             <div className="spinner" />
+          </div>
+        )}
+        {remuxNote && (
+          <div className="remux-note">
+            Preparing a Firefox-compatible copy — one-time wait, then it plays instantly every time.
           </div>
         )}
         {flash === "play" && <div className="flash"><IPlay /></div>}

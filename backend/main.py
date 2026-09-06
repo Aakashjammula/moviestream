@@ -14,6 +14,7 @@ Endpoints (all under the ``/api`` prefix when behind nginx):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -366,6 +367,117 @@ VIDEO_TYPES = {
 
 def _media_type(path: Path) -> str:
     return VIDEO_TYPES.get(path.suffix.lower(), "video/mp4")
+
+
+REMUX_DIR = Path(os.environ.get("REMUX_DIR", "/app/data/remux"))
+REMUX_DIR.mkdir(parents=True, exist_ok=True)
+
+# Containers Firefox (pre-145 / pref-off builds) can't play in <video>.
+NEEDS_REMUX = {".mkv"}
+
+
+def _remux_paths(movie_id: int) -> tuple[Path, Path]:
+    return REMUX_DIR / f"{movie_id}.mp4", REMUX_DIR / f"{movie_id}.json"
+
+
+def _remux_fresh(src: Path, dst: Path, meta: Path) -> bool:
+    """True when the cached mp4 matches the current source file."""
+    if not dst.is_file() or not meta.is_file():
+        return False
+    try:
+        st = src.stat()
+        info = json.loads(meta.read_text())
+        return (
+            info.get("size") == st.st_size
+            and info.get("mtime") == st.st_mtime
+            and dst.stat().st_size > 0
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def _build_remux(src: Path, dst: Path, meta: Path) -> None:
+    """Copy video+audio streams into an MP4 (faststart). No re-encode."""
+    import subprocess
+
+    import imageio_ffmpeg
+
+    tmp = dst.with_suffix(".tmp.mp4")
+    proc = subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-hide_banner", "-y",
+            "-i", str(src),
+            "-map", "0:v:0", "-map", "0:a",
+            "-c", "copy", "-sn",
+            "-movflags", "+faststart",
+            str(tmp),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=600,
+        text=True,
+    )
+    if proc.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise RuntimeError((proc.stderr or "")[-500:] or "ffmpeg remux failed")
+    st = src.stat()
+    meta.write_text(json.dumps({"size": st.st_size, "mtime": st.st_mtime}))
+    os.replace(tmp, dst)
+
+
+def _lookup_media(movie_id: int) -> Path:
+    with database.get_db() as conn:
+        row = conn.execute(
+            "SELECT title, file_path FROM movies WHERE id = ?", (movie_id,)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    path = Path(row["file_path"])
+    if not path.is_file():
+        raise HTTPException(status_code=410, detail="File no longer on disk")
+    return path
+
+
+@app.get("/api/remux/{movie_id}/status")
+async def remux_status(movie_id: int) -> dict:
+    path = _lookup_media(movie_id)
+    if path.suffix.lower() not in NEEDS_REMUX:
+        return {"cached": True, "needed": False}
+    dst, meta = _remux_paths(movie_id)
+    return {"cached": _remux_fresh(path, dst, meta), "needed": True}
+
+
+@app.get("/api/remux/{movie_id}")
+async def remux_movie(movie_id: int, request: Request):
+    """Firefox-compatible MP4 version of a file, remuxed once then cached."""
+    import asyncio
+
+    path = _lookup_media(movie_id)
+    if path.suffix.lower() not in NEEDS_REMUX:
+        raise HTTPException(status_code=400, detail="Remux not needed for this file")
+    dst, meta = _remux_paths(movie_id)
+    if not _remux_fresh(path, dst, meta):
+        log = logging.getLogger("uvicorn.error")
+        log.info("remuxing %s for Firefox-compatible playback", path.name)
+        try:
+            await asyncio.to_thread(_build_remux, path, dst, meta)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Remux failed: {exc}")
+    if request.headers.get("x-via-nginx") == "1":
+        return Response(
+            status_code=200,
+            media_type="video/mp4",
+            headers={
+                "X-Accel-Redirect": f"/_cache/{movie_id}.mp4",
+                "Content-Type": "video/mp4",
+                "Accept-Ranges": "bytes",
+            },
+        )
+    return FileResponse(str(dst), media_type="video/mp4", filename=dst.name)
 
 
 @app.get("/api/stream/{movie_id}")

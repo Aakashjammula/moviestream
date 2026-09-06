@@ -42,6 +42,7 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ${MEDIA_DIR:?Please set MEDIA_DIR in .env (absolute path to your media folder)}:/mnt/movies:ro
+      - movie-data:/app/data:ro
     depends_on:
       - backend
       - frontend
