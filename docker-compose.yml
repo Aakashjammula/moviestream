@@ -1,3 +1,10 @@
+# Backend only. The UI lives in its own repo (moviestream-frontend) on Vercel.
+#
+#   Browser ──> movies.aakashjammula.com      (Vercel: static UI)
+#   Browser ──> movies-api.aakashjammula.com  ──> Cloudflare Tunnel ──> backend:8000
+#
+# FastAPI serves the API *and* the video files (Range requests for seeking), so no
+# nginx is needed. Start it when you want MovieStream online:  docker compose up -d
 services:
   backend:
     build:
@@ -9,13 +16,12 @@ services:
       MOVIE_DB: /app/data/movies.db
       MOVIE_DIR: /mnt/movies
       TMDB_API_KEY: ${TMDB_API_KEY:-}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:3000}
     volumes:
       - movie-data:/app/data
-      - ${MEDIA_DIR:?Please set MEDIA_DIR in .env (absolute path to your media folder)}:/mnt/movies
-    expose:
-      - "8000"
+      - ${MEDIA_DIR:?Please set MEDIA_DIR in .env (absolute path to your media folder)}:/mnt/movies # writable: fetched subtitles are saved next to each video
     ports:
-      - "8000:8000" # direct API access for dev; production goes through nginx
+      - "8000:8000" # local access (frontend dev on localhost:3000); internet traffic comes via the tunnel
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -23,38 +29,13 @@ services:
       retries: 3
     restart: unless-stopped
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    expose:
-      - "3000"
-    depends_on:
-      backend:
-        condition: service_started
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:latest
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ${MEDIA_DIR:?Please set MEDIA_DIR in .env (absolute path to your media folder)}:/mnt/movies:ro
-      - movie-data:/app/data:ro
-    depends_on:
-      - backend
-      - frontend
-    restart: unless-stopped
-
   cloudflared:
     image: cloudflare/cloudflared:latest
-    # Set TUNNEL_TOKEN in .env (from your Cloudflare dashboard),
-    # then: docker compose up -d cloudflared
+    # Tunnel public hostname: movies-api.aakashjammula.com → http://backend:8000
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:-missing}
     depends_on:
-      - nginx
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

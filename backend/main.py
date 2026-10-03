@@ -124,12 +124,6 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Movie API", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 def _is_https(request: Request) -> bool:
@@ -150,6 +144,24 @@ async def auth_gate(request: Request, call_next):
             content='{"detail":"Login required"}',
         )
     return await call_next(request)
+
+
+# The UI is served from another origin (Vercel), so allow exactly those origins, with
+# credentials for the login cookie. Added after auth_gate so it is the OUTERMOST middleware:
+# 401 responses and preflight OPTIONS requests must carry CORS headers too.
+FRONTEND_ORIGINS = [
+    o.strip().rstrip("/")
+    for o in os.environ.get("FRONTEND_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
+    max_age=600,
+)
 
 
 class LoginBody(BaseModel):
@@ -188,9 +200,11 @@ async def logout_others(request: Request) -> dict:
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # Behind Cloudflare Tunnel the real visitor IP is in CF-Connecting-IP (set by Cloudflare,
+    # can't be spoofed by the client). X-Forwarded-For's first entry is client-controlled.
+    cf = request.headers.get("cf-connecting-ip", "").strip()
+    if cf:
+        return cf
     return request.client.host if request.client else "?"
 
 
@@ -256,7 +270,7 @@ async def health() -> dict:
 
 @app.get("/")
 async def read_root() -> dict:
-    return {"message": "Welcome to the Movie API"}
+    return {"message": "MovieStream API. The UI is at the frontend address."}
 
 
 MOVIE_COLS = (
