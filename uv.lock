@@ -157,9 +157,9 @@ wheels = [
 ]
 
 [[package]]
-name = "movie-backend"
+name = "moviestream"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
     { name = "fastapi" },

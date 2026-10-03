@@ -1,7 +1,7 @@
 [project]
-name = "movie-backend"
+name = "moviestream"
 version = "0.1.0"
-description = "Backend for movie streaming app"
+description = "Backend for MovieStream, a self-hosted movie and TV streaming app"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi",
@@ -10,6 +10,11 @@ dependencies = [
     "imageio-ffmpeg",
     "bcrypt",
 ]
+
+# src/ layout: the package lives in src/moviestream (uv_build's default).
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
 
 [tool.uv]
 managed = true

@@ -20,7 +20,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import database
+from . import database
 
 log = logging.getLogger("enrich")
 

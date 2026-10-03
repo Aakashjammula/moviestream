@@ -28,8 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
-import database
-import enrich
+from . import database, enrich
 
 APP_PASSWORD_HASH = os.environ.get("APP_PASSWORD_HASH", "").strip()
 
