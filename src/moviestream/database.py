@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS shows (
     overview TEXT DEFAULT '',
     genres TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS failed_logins (
+    ip TEXT NOT NULL,
+    at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_failed_logins_at ON failed_logins(at);
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL,
@@ -499,10 +504,37 @@ def scan_movies() -> int:
     return count
 
 
-if __name__ == "__main__":
-    init_db()
-    n = scan_movies()
-    print(f"Database initialized at {DATABASE_PATH}, {n} files indexed.")
+# ---------- failed logins (shared by all workers, survives restarts) ----------
+
+def failed_logins_since(since: float, ip: str | None = None) -> int:
+    """Failed logins after `since` (epoch seconds), for one IP or for everyone."""
+    with get_db() as conn:
+        if ip is None:
+            row = conn.execute("SELECT COUNT(*) FROM failed_logins WHERE at > ?", (since,)).fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) FROM failed_logins WHERE ip = ? AND at > ?", (ip, since)).fetchone()
+    return int(row[0])
+
+
+def oldest_failed_login_since(since: float) -> float | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT MIN(at) FROM failed_logins WHERE at > ?", (since,)).fetchone()
+    return row[0]
+
+
+def record_failed_login(ip: str, at: float) -> None:
+    with get_db() as conn:
+        conn.execute("INSERT INTO failed_logins (ip, at) VALUES (?, ?)", (ip, at))
+        conn.execute("DELETE FROM failed_logins WHERE at < ?", (at - 86400,))  # keep a day
+
+
+def clear_failed_logins(ip: str | None = None) -> None:
+    """Forget failures for one IP (after a good login), or all of them (manual unlock)."""
+    with get_db() as conn:
+        if ip is None:
+            conn.execute("DELETE FROM failed_logins")
+        else:
+            conn.execute("DELETE FROM failed_logins WHERE ip = ?", (ip,))
 
 
 SESSION_TTL = 30 * 24 * 3600  # 30 days
@@ -558,3 +590,16 @@ def list_sessions() -> list[dict]:
             " ORDER BY last_seen DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+if __name__ == "__main__":
+    import sys
+
+    init_db()
+    if "--unlock-login" in sys.argv:
+        # Login paused after many failed attempts? Clear the counters.
+        clear_failed_logins()
+        print("Failed-login counters cleared; login is open again.")
+    else:
+        n = scan_movies()
+        print(f"Database initialized at {DATABASE_PATH}, {n} files indexed.")

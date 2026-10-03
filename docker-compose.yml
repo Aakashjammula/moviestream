@@ -3,8 +3,8 @@
 #   Browser ──> movies.aakashjammula.com      (Vercel: static UI)
 #   Browser ──> movies-api.aakashjammula.com  ──> Cloudflare Tunnel ──> backend:8000
 #
-# FastAPI serves the API *and* the video files (Range requests for seeking), so no
-# nginx is needed. Start it when you want MovieStream online:  docker compose up -d
+# FastAPI serves the API *and* the video files (Range requests for seeking).
+# Start it when you want MovieStream online:  docker compose up -d
 services:
   backend:
     build:
@@ -32,7 +32,9 @@ services:
           propagation: rslave
           create_host_path: false
     ports:
-      - "8000:8000" # local access (frontend dev on localhost:3000); internet traffic comes via the tunnel
+      # This machine only. Other devices on your Wi-Fi/LAN can't reach the backend directly
+      # (that path skipped Cloudflare and its rate limiting). Internet traffic comes via the tunnel.
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s

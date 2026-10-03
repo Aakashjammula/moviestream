@@ -1,6 +1,6 @@
 """Movie streaming API.
 
-Endpoints (all under the ``/api`` prefix when behind nginx):
+Endpoints:
     GET /health               liveness probe
     GET /api/movies           list indexed movies (media_type=movie)
     GET /api/movies/{id}      movie metadata
@@ -18,7 +18,6 @@ import logging
 import os
 import re
 import time
-import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -40,10 +39,15 @@ SESSION_MAX_AGE = 30 * 24 * 3600
 # Public paths (no session needed).
 OPEN_PATHS = {"/", "/health", "/api/login", "/api/logout"}
 
-# Login rate limit: max attempts per IP per window.
+# Login rate limits, stored in the database (shared by all workers, survive restarts):
+# - per IP: 10 failed logins per minute
+# - overall: 30 failed logins per hour from anywhere pauses login, so many IPs
+#   (a botnet) can't keep guessing. Your existing sessions keep working; to reopen
+#   login early: docker compose exec backend uv run --no-sync python -m moviestream.database --unlock-login
 LOGIN_LIMIT = 10
 LOGIN_WINDOW = 60
-_login_attempts: dict[str, list[float]] = {}
+GLOBAL_LOGIN_LIMIT = 30
+GLOBAL_LOGIN_WINDOW = 3600
 
 
 class Movie(BaseModel):
@@ -248,18 +252,23 @@ async def login(body: LoginBody, request: Request):
         raise HTTPException(status_code=503, detail="Server login not configured")
     ip = _client_ip(request)
     now = time.time()
-    hits = [t for t in _login_attempts.get(ip, []) if now - t < LOGIN_WINDOW]
-    if len(hits) >= LOGIN_LIMIT:
-        raise HTTPException(status_code=429, detail="Too many attempts, try later")
-    hits.append(now)
-    _login_attempts[ip] = hits
+    if database.failed_logins_since(now - LOGIN_WINDOW, ip=ip) >= LOGIN_LIMIT:
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again in a minute.")
+    if database.failed_logins_since(now - GLOBAL_LOGIN_WINDOW) >= GLOBAL_LOGIN_LIMIT:
+        oldest = database.oldest_failed_login_since(now - GLOBAL_LOGIN_WINDOW) or now
+        minutes = max(1, round((oldest + GLOBAL_LOGIN_WINDOW - now) / 60))
+        raise HTTPException(
+            status_code=429,
+            detail=f"Login is paused after many failed attempts. Try again in about {minutes} min.",
+        )
     try:
         ok = bcrypt.checkpw(body.password.encode(), APP_PASSWORD_HASH.encode())
     except Exception:
         ok = False
     if not ok:
+        database.record_failed_login(ip, now)
         raise HTTPException(status_code=401, detail="Wrong password")
-    _login_attempts.pop(ip, None)
+    database.clear_failed_logins(ip)
     sid = database.create_session(
         user_agent=request.headers.get("user-agent", ""), ip=ip
     )
@@ -548,16 +557,6 @@ async def remux_movie(movie_id: int, request: Request):
         await asyncio.to_thread(_ensure_remux, path, movie_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Remux failed: {exc}")
-    if request.headers.get("x-via-nginx") == "1":
-        return Response(
-            status_code=200,
-            media_type="video/mp4",
-            headers={
-                "X-Accel-Redirect": f"/_cache/{movie_id}.mp4",
-                "Content-Type": "video/mp4",
-                "Accept-Ranges": "bytes",
-            },
-        )
     return FileResponse(str(dst), media_type="video/mp4", filename=dst.name)
 
 
@@ -572,24 +571,7 @@ async def stream_movie(movie_id: int, request: Request):
     path = Path(row["file_path"])
     _require_file(path)
     media_type = _media_type(path)
-    if request.headers.get("x-via-nginx") == "1":
-        # Hand off to nginx: zero-copy sendfile + native Range seeks.
-        # The /_media/ location is internal-only (see nginx conf).
-        try:
-            rel = path.relative_to(database.MOVIE_DIR)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="File outside library")
-        return Response(
-            status_code=200,
-            media_type=media_type,
-            headers={
-                "X-Accel-Redirect": "/_media/" + urllib.parse.quote(str(rel)),
-                "Content-Type": media_type,
-                "Accept-Ranges": "bytes",
-            },
-        )
-    # Direct backend access (dev / container-IP): serve from Python.
-    # Starlette's FileResponse handles Range requests.
+    # Starlette's FileResponse handles Range requests (seeking).
     return FileResponse(str(path), media_type=media_type, filename=path.name)
 
 
