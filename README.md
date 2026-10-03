@@ -75,6 +75,7 @@ How the two sites work together:
 - Subtitles: sidecar `.srt`/`.vtt` files are used first. Missing ones are auto-downloaded (YIFY/OpenSubtitles) and saved **next to the video**, so the media folder is mounted writable.
 - Sessions expire after 30 days of inactivity. Login attempts are rate-limited per visitor IP (`CF-Connecting-IP`).
 - `backend` also listens on port 8000 locally, for frontend development on `localhost:3000`.
+- Code layout: `main.py` (API), `database.py` (media index, sessions), `enrich.py` (TMDB/TVMaze, subtitles). Docker builds from the repo root; `.dockerignore` keeps `.env` out of the image.
 - The backend still supports nginx `X-Accel-Redirect` delivery (requests with `X-Via-Nginx: 1`), in case you ever put nginx back for heavier use.
 
 ## Development

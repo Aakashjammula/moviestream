@@ -1,0 +1,16 @@
+# Keep secrets and local junk out of the Docker build context.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.venv
+backend/
+__pycache__
+*.py[cod]
+data/
+*.db
+*.db-*
+*.log
+README.md
+docker-compose.yml
