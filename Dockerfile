@@ -15,4 +15,8 @@ RUN uv sync --locked --no-dev
 
 EXPOSE 8000
 
-CMD ["uv", "run", "--no-sync", "uvicorn", "moviestream.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# The media drive is mounted at /host-media (its parent folder, see docker-compose.yml).
+# /mnt/movies is a link to the media folder on it, so stored file paths stay
+# /mnt/movies/... whether or not the drive is plugged in.
+ENV MOVIE_DIR=/mnt/movies
+CMD ["sh", "-c", "if [ -n \"$MEDIA_SUBDIR\" ]; then ln -sfn \"/host-media/$MEDIA_SUBDIR\" /mnt/movies; fi; exec uv run --no-sync uvicorn moviestream.main:app --host 0.0.0.0 --port 8000 --workers 2"]

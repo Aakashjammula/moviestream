@@ -416,6 +416,19 @@ def _get_show_id(conn: sqlite3.Connection, name: str, year: int | None) -> int:
     return cur.lastrowid
 
 
+def media_available() -> bool:
+    """True when the media folder is reachable and not empty.
+
+    An unplugged drive shows up as a missing folder or an empty placeholder
+    directory, so "exists but empty" counts as not connected.
+    """
+    try:
+        with os.scandir(MOVIE_DIR) as entries:
+            return next(entries, None) is not None
+    except OSError:
+        return False
+
+
 def scan_movies() -> int:
     """Walk MOVIE_DIR and upsert every video file. Returns files indexed."""
     init_db()

@@ -30,6 +30,8 @@ from pydantic import BaseModel
 
 from . import database, enrich
 
+log = logging.getLogger("uvicorn.error")
+
 APP_PASSWORD_HASH = os.environ.get("APP_PASSWORD_HASH", "").strip()
 
 SESSION_COOKIE = "msid"
@@ -114,11 +116,44 @@ async def lifespan(_app: FastAPI):
             database.scan_movies()
             enrich.enrich_background()
             enrich.pregen_thumbs_background()
+            _start_media_watcher()
     except ImportError:
         database.scan_movies()
         enrich.enrich_background()
         enrich.pregen_thumbs_background()
     yield
+
+
+MEDIA_POLL_SECONDS = 20
+
+
+def _start_media_watcher() -> None:
+    """Re-index when the media drive is plugged back in (no restart needed).
+
+    The media mount uses rslave propagation, so a drive mounted on the host
+    later appears inside the container; this notices and rescans it.
+    """
+    import threading
+
+    def _watch() -> None:
+        was_available = database.media_available()
+        while True:
+            time.sleep(MEDIA_POLL_SECONDS)
+            available = database.media_available()
+            if available and not was_available:
+                log.info("media drive connected: rescanning library")
+                try:
+                    n = database.scan_movies()
+                    log.info("rescan done: %s files indexed", n)
+                    enrich.enrich_background()
+                    enrich.pregen_thumbs_background()
+                except Exception:
+                    log.exception("rescan after reconnect failed")
+            elif was_available and not available:
+                log.warning("media drive disconnected: playback unavailable until it is back")
+            was_available = available
+
+    threading.Thread(target=_watch, name="media-watcher", daemon=True).start()
 
 
 app = FastAPI(title="Movie API", lifespan=lifespan)
@@ -264,7 +299,11 @@ async def me() -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "tmdb": bool(enrich.TMDB_KEY)}
+    return {
+        "status": "ok",
+        "tmdb": bool(enrich.TMDB_KEY),
+        "media": "ok" if database.media_available() else "missing",
+    }
 
 
 @app.get("/")
@@ -448,6 +487,15 @@ def _build_remux(src: Path, dst: Path, meta: Path) -> None:
     os.replace(tmp, dst)
 
 
+def _require_file(path: Path) -> None:
+    """410 when one file is gone; 503 when the whole media drive isn't connected."""
+    if path.is_file():
+        return
+    if not database.media_available():
+        raise HTTPException(status_code=503, detail="Movie drive isn't connected")
+    raise HTTPException(status_code=410, detail="File no longer on disk")
+
+
 def _lookup_media(movie_id: int) -> Path:
     with database.get_db() as conn:
         row = conn.execute(
@@ -456,8 +504,7 @@ def _lookup_media(movie_id: int) -> Path:
     if row is None:
         raise HTTPException(status_code=404, detail="Movie not found")
     path = Path(row["file_path"])
-    if not path.is_file():
-        raise HTTPException(status_code=410, detail="File no longer on disk")
+    _require_file(path)
     return path
 
 
@@ -523,8 +570,7 @@ async def stream_movie(movie_id: int, request: Request):
     if row is None:
         raise HTTPException(status_code=404, detail="Movie not found")
     path = Path(row["file_path"])
-    if not path.is_file():
-        raise HTTPException(status_code=410, detail="File no longer on disk")
+    _require_file(path)
     media_type = _media_type(path)
     if request.headers.get("x-via-nginx") == "1":
         # Hand off to nginx: zero-copy sendfile + native Range seeks.

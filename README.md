@@ -39,7 +39,8 @@ How the two sites work together:
    cp .env.example .env
    ```
    Edit `.env`:
-   - `MEDIA_DIR`: absolute path to your media folder (required).
+   - `MEDIA_ROOT` + `MEDIA_SUBDIR` (required): the folder your drive mounts **in**, and the media folder on the drive.
+     For `/run/media/you/Expansion/movies/data`, use `MEDIA_ROOT=/run/media/you` and `MEDIA_SUBDIR=Expansion/movies/data`.
    - `APP_PASSWORD_HASH`: bcrypt hash of your login password. Generate it with:
      ```bash
      docker compose run --rm backend python3 -c \
@@ -59,6 +60,13 @@ How the two sites work together:
    The first start scans your media; posters and subtitles are filled in in the background.
 
 4. **Stop it:** `docker compose down`. The UI then shows "Server is offline".
+
+### Media on a USB drive
+
+The backend mounts the folder the drive appears **in** (`MEDIA_ROOT`), not the drive itself, using `rslave` propagation:
+- **Drive unplugged:** the library stays browsable, `/health` reports `"media": "missing"`, Play returns 503 "Movie drive isn't connected", and the UI shows a banner.
+- **Plug it in while the backend is running:** it appears inside the container on its own, the library is rescanned within ~20 s, and the banner clears. No restart needed.
+- Docker never creates a placeholder folder where the drive should mount (`create_host_path: false`). That placeholder would push the real drive to `…/Expansion1`.
 
 ## Everyday use
 
